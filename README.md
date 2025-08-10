@@ -9,8 +9,8 @@ LexiQuest is a modern, full-stack dictionary application that helps users expand
 
 ## 🚀 Quick Deploy
 
-[![Deploy Frontend](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yourusername/lexi-quest)
-[![Deploy Backend](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/yourusername/lexi-quest)
+[![Deploy Frontend](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Nerf-Ivan/lexi-quest)
+[![Deploy Backend](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/Nerf-Ivan/lexi-quest)
 
 ## 🚀 Features
 
