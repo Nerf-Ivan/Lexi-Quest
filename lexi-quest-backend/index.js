@@ -2,7 +2,6 @@
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
-const mongoose = require('mongoose');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 require('dotenv').config();
@@ -38,56 +37,15 @@ app.use((req, res, next) => {
     next();
 });
 
-// --- Database Connection ---
-const mongoURI = process.env.MONGO_URI;
-
-// Global variable to track database connection status
-let isDbConnected = false;
-
-// Use mongoose to connect to the MongoDB database
-const connectDB = async () => {
-    try {
-        await mongoose.connect(mongoURI);
-        console.log('Connected to MongoDB Atlas successfully');
-        isDbConnected = true;
-    } catch (err) {
-        console.error('Error connecting to MongoDB:', err);
-        console.log('Running in demo mode without database. Some features may be limited.');
-        isDbConnected = false;
-    }
-};
-
-// Connect to database
-connectDB();
-
-// Middleware to check database connection
-const checkDbConnection = (req, res, next) => {
-    if (!isDbConnected && req.path.includes('/api/')) {
-        // For demo purposes, we'll allow some endpoints to work without DB
-        if (req.path.includes('/search/') || req.path === '/') {
-            return next();
-        }
-        return res.status(503).json({ 
-            error: 'Database not available. Please check your MongoDB connection.',
-            demo: true
-        });
-    }
-    next();
-};
-
-app.use(checkDbConnection);
-
 //---Routes---
 app.get('/', (req, res) => {
     res.json({
         message: 'LexiQuest Backend is running!',
         version: '2.0.0',
-        database: isDbConnected ? 'Connected' : 'Disconnected',
+        status: 'Demo Mode - No Database Required',
         endpoints: {
-            auth: '/api/auth',
-            words: '/api/words',
-            analytics: '/api/analytics',
-            search: '/api/search/:word'
+            search: '/api/search/:word',
+            analytics: '/api/analytics/*'
         }
     });
 });
@@ -98,20 +56,9 @@ app.get('/health', (req, res) => {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        database: isDbConnected ? 'connected' : 'disconnected'
+        mode: 'demo'
     });
 });
-
-// Use routes - load them regardless of DB connection, let individual routes handle DB checks
-try {
-    app.use('/api/auth', require('./routes/auth')); // Import and use the auth routes
-    app.use('/api/words', require('./routes/words')); // Import and use the words routes
-    app.use('/api/analytics', require('./routes/analytics')); // Import and use the analytics routes
-    console.log('Routes loaded successfully');
-} catch (error) {
-    console.log('Error loading route files:', error.message);
-    console.log('Using demo endpoints only');
-}
 
 //Define the main API endpoint for searching a word
 app.get('/api/search/:word', async (req, res) => {
@@ -131,39 +78,6 @@ app.get('/api/search/:word', async (req, res) => {
     console.log(`Received search request for word: ${sanitizedWord}`);
 
     try {
-        // If database is connected, try to use Word model for caching
-        if (isDbConnected) {
-            try {
-                const Word = require('./models/Word');
-                
-                // Check if word exists in cache and is not expired
-                let cachedWord = await Word.findOne({ 
-                    word: sanitizedWord,
-                    cacheExpiry: { $gt: new Date() }
-                });
-                
-                if (cachedWord) {
-                    // Update analytics
-                    await cachedWord.incrementSearchCount();
-                    
-                    // Return cached data
-                    const formattedData = {
-                        word: cachedWord.word,
-                        phonetic: cachedWord.phonetic,
-                        phoneticAudio: cachedWord.phoneticAudio,
-                        origin: cachedWord.origin,
-                        meanings: cachedWord.meanings,
-                        sourceUrls: cachedWord.sourceUrls,
-                        cached: true
-                    };
-                    
-                    return res.json(formattedData);
-                }
-            } catch (modelError) {
-                console.log('Word model not available, fetching directly from API');
-            }
-        }
-
         // Fetch from external API
         const apiUrl = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(sanitizedWord)}`;
         
@@ -211,26 +125,6 @@ app.get('/api/search/:word', async (req, res) => {
             cached: false
         };
 
-        // Cache the word data if database is connected
-        if (isDbConnected) {
-            try {
-                const Word = require('./models/Word');
-                const newWord = new Word({
-                    word: sanitizedWord,
-                    phonetic: phoneticText,
-                    phoneticAudio: phoneticAudio,
-                    origin: formattedData.origin,
-                    meanings: formattedData.meanings,
-                    sourceUrls: formattedData.sourceUrls,
-                    searchCount: 1
-                });
-                await newWord.save();
-            } catch (cacheError) {
-                console.error('Error caching word:', cacheError);
-                // Continue without caching - don't fail the request
-            }
-        }
-
         res.json(formattedData);
     } catch (error) {
         console.error(`Error fetching data for word "${sanitizedWord}":`, error);
@@ -242,12 +136,19 @@ app.get('/api/search/:word', async (req, res) => {
     }
 });
 
-// Demo endpoints for frontend compatibility
+// Demo analytics endpoints
 app.get('/api/analytics/word-of-the-day', (req, res) => {
+    const words = [
+        { word: 'serendipity', phonetic: '/ˌser.ənˈdɪp.ɪ.ti/', definition: 'The occurrence and development of events by chance in a happy or beneficial way.' },
+        { word: 'ephemeral', phonetic: '/ɪˈfem.ər.əl/', definition: 'Lasting for a very short time.' },
+        { word: 'ubiquitous', phonetic: '/juːˈbɪk.wɪ.təs/', definition: 'Present, appearing, or found everywhere.' },
+        { word: 'mellifluous', phonetic: '/məˈlɪf.lu.əs/', definition: 'Sweet or musical; pleasant to hear.' },
+        { word: 'petrichor', phonetic: '/ˈpet.rɪ.kɔːr/', definition: 'A pleasant smell frequently accompanying the first rain after a long period of warm, dry weather.' }
+    ];
+    
+    const todayWord = words[new Date().getDate() % words.length];
     res.json({
-        word: 'serendipity',
-        phonetic: '/ˌser.ənˈdɪp.ɪ.ti/',
-        definition: 'The occurrence and development of events by chance in a happy or beneficial way.',
+        ...todayWord,
         isDefault: true
     });
 });
@@ -263,39 +164,48 @@ app.get('/api/analytics/popular', (req, res) => {
     ]);
 });
 
-// Auth endpoints (demo mode when DB not connected)
+// Dummy auth endpoints for demo
 app.post('/api/auth/login', (req, res) => {
-    if (!isDbConnected) {
-        return res.status(503).json({ 
-            error: 'Authentication not available. Database connection required.',
-            demo: true
-        });
-    }
-    // If DB is connected, this will be handled by the auth routes
-    res.status(404).json({ error: 'Auth route not properly configured' });
+    res.status(503).json({ 
+        error: 'Authentication is disabled in demo mode. This is a showcase version.',
+        demo: true
+    });
 });
 
 app.post('/api/auth/register', (req, res) => {
-    if (!isDbConnected) {
-        return res.status(503).json({ 
-            error: 'Registration not available. Database connection required.',
-            demo: true
-        });
-    }
-    // If DB is connected, this will be handled by the auth routes
-    res.status(404).json({ error: 'Auth route not properly configured' });
+    res.status(503).json({ 
+        error: 'Registration is disabled in demo mode. This is a showcase version.',
+        demo: true
+    });
 });
 
-// Words endpoints (demo mode when DB not connected)
+app.get('/api/auth/me', (req, res) => {
+    res.status(503).json({ 
+        error: 'User features are disabled in demo mode.',
+        demo: true
+    });
+});
+
+// Dummy user features endpoints
 app.get('/api/words/liked', (req, res) => {
-    if (!isDbConnected) {
-        return res.status(503).json({ 
-            error: 'User features not available. Database connection required.',
-            demo: true
-        });
-    }
-    // If DB is connected, this will be handled by the words routes
-    res.status(404).json({ error: 'Words route not properly configured' });
+    res.status(503).json({ 
+        error: 'User features are disabled in demo mode.',
+        demo: true
+    });
+});
+
+app.post('/api/words/like', (req, res) => {
+    res.status(503).json({ 
+        error: 'User features are disabled in demo mode.',
+        demo: true
+    });
+});
+
+app.delete('/api/words/unlike/:word', (req, res) => {
+    res.status(503).json({ 
+        error: 'User features are disabled in demo mode.',
+        demo: true
+    });
 });
 
 // Error handling middleware
@@ -313,7 +223,7 @@ app.use('*', (req, res) => {
 const server = app.listen(PORT, () => {
     console.log(`Server is listening on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`Database: ${isDbConnected ? 'Connected to MongoDB Atlas' : 'Disconnected - Demo mode'}`);
+    console.log(`Mode: Demo - No database required`);
 });
 
 // Graceful shutdown
@@ -321,8 +231,5 @@ process.on('SIGTERM', () => {
     console.log('SIGTERM received, shutting down gracefully');
     server.close(() => {
         console.log('Process terminated');
-        if (mongoose.connection.readyState === 1) {
-            mongoose.connection.close();
-        }
     });
 });
